@@ -1,0 +1,238 @@
+-- SwiftPay Digital Banking System
+-- Portfolio 1: PostgreSQL database schema and sample data
+-- WARNING: This script drops and recreates the SwiftPay tables if they already exist.
+-- Run this script only in your swiftpay2_db database.
+
+BEGIN;
+
+DROP TABLE IF EXISTS audit_logs CASCADE;
+DROP TABLE IF EXISTS staff CASCADE;
+DROP TABLE IF EXISTS ledger_entries CASCADE;
+DROP TABLE IF EXISTS transfers CASCADE;
+DROP TABLE IF EXISTS bank_transactions CASCADE;
+DROP TABLE IF EXISTS beneficiaries CASCADE;
+DROP TABLE IF EXISTS accounts CASCADE;
+DROP TABLE IF EXISTS branches CASCADE;
+DROP TABLE IF EXISTS account_types CASCADE;
+DROP TABLE IF EXISTS customers CASCADE;
+
+CREATE TABLE customers (
+    customer_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    first_name VARCHAR(60) NOT NULL,
+    last_name VARCHAR(60) NOT NULL,
+    email VARCHAR(120) NOT NULL UNIQUE,
+    phone VARCHAR(20) NOT NULL UNIQUE,
+    bvn CHAR(11) UNIQUE,
+    date_of_birth DATE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    customer_status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE'
+        CHECK (customer_status IN ('ACTIVE', 'SUSPENDED', 'CLOSED'))
+);
+
+CREATE TABLE account_types (
+    account_type_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    type_name VARCHAR(40) NOT NULL UNIQUE,
+    description VARCHAR(200),
+    minimum_balance NUMERIC(18,2) NOT NULL DEFAULT 0
+        CHECK (minimum_balance >= 0)
+);
+
+CREATE TABLE branches (
+    branch_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    branch_name VARCHAR(100) NOT NULL,
+    city VARCHAR(80) NOT NULL,
+    state VARCHAR(80) NOT NULL
+);
+
+CREATE TABLE accounts (
+    account_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    customer_id BIGINT NOT NULL REFERENCES customers(customer_id),
+    account_type_id BIGINT NOT NULL REFERENCES account_types(account_type_id),
+    branch_id BIGINT REFERENCES branches(branch_id),
+    account_number CHAR(10) NOT NULL UNIQUE,
+    currency CHAR(3) NOT NULL DEFAULT 'NGN',
+    current_balance NUMERIC(18,2) NOT NULL DEFAULT 0
+        CHECK (current_balance >= 0),
+    account_status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE'
+        CHECK (account_status IN ('ACTIVE', 'FROZEN', 'CLOSED')),
+    opened_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE beneficiaries (
+    beneficiary_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    customer_id BIGINT NOT NULL REFERENCES customers(customer_id),
+    beneficiary_name VARCHAR(120) NOT NULL,
+    beneficiary_account_number CHAR(10) NOT NULL,
+    beneficiary_bank VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (customer_id, beneficiary_account_number, beneficiary_bank)
+);
+
+CREATE TABLE bank_transactions (
+    transaction_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    account_id BIGINT NOT NULL REFERENCES accounts(account_id),
+    transaction_type VARCHAR(20) NOT NULL
+        CHECK (transaction_type IN ('DEPOSIT', 'WITHDRAWAL', 'TRANSFER', 'FEE')),
+    amount NUMERIC(18,2) NOT NULL CHECK (amount > 0),
+    transaction_status VARCHAR(20) NOT NULL DEFAULT 'PENDING'
+        CHECK (transaction_status IN ('PENDING', 'SUCCESSFUL', 'FAILED', 'REVERSED')),
+    description VARCHAR(250),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE transfers (
+    transfer_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    transaction_id BIGINT NOT NULL UNIQUE REFERENCES bank_transactions(transaction_id),
+    sender_account_id BIGINT NOT NULL REFERENCES accounts(account_id),
+    recipient_account_id BIGINT NOT NULL REFERENCES accounts(account_id),
+    amount NUMERIC(18,2) NOT NULL CHECK (amount > 0),
+    transfer_reference VARCHAR(40) NOT NULL UNIQUE,
+    transfer_status VARCHAR(20) NOT NULL DEFAULT 'PENDING'
+        CHECK (transfer_status IN ('PENDING', 'SUCCESSFUL', 'FAILED', 'REVERSED')),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK (sender_account_id <> recipient_account_id)
+);
+
+CREATE TABLE ledger_entries (
+    ledger_entry_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    transaction_id BIGINT NOT NULL REFERENCES bank_transactions(transaction_id),
+    account_id BIGINT NOT NULL REFERENCES accounts(account_id),
+    entry_type VARCHAR(10) NOT NULL CHECK (entry_type IN ('DEBIT', 'CREDIT')),
+    amount NUMERIC(18,2) NOT NULL CHECK (amount > 0),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE staff (
+    staff_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    first_name VARCHAR(60) NOT NULL,
+    last_name VARCHAR(60) NOT NULL,
+    email VARCHAR(120) NOT NULL UNIQUE,
+    role_name VARCHAR(60) NOT NULL,
+    branch_id BIGINT REFERENCES branches(branch_id)
+);
+
+CREATE TABLE audit_logs (
+    audit_log_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    staff_id BIGINT REFERENCES staff(staff_id),
+    action_name VARCHAR(100) NOT NULL,
+    table_affected VARCHAR(80) NOT NULL,
+    record_id BIGINT,
+    action_details TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_accounts_customer_id ON accounts(customer_id);
+CREATE INDEX idx_transactions_account_created ON bank_transactions(account_id, created_at);
+CREATE INDEX idx_ledger_account_id ON ledger_entries(account_id);
+CREATE INDEX idx_transfers_sender_id ON transfers(sender_account_id);
+
+INSERT INTO account_types (type_name, description, minimum_balance) VALUES
+('Savings', 'Personal savings account', 1000.00),
+('Current', 'Everyday current account', 0.00),
+('Business', 'Small business account', 5000.00);
+
+INSERT INTO branches (branch_name, city, state) VALUES
+('Lagos Central Branch', 'Lagos', 'Lagos'),
+('Abuja Main Branch', 'Abuja', 'FCT');
+
+-- Fictional sample records; all identifiers and details are illustrative.
+INSERT INTO customers (first_name, last_name, email, phone, bvn, date_of_birth) VALUES
+('Ada', 'Okafor', 'ada.okafor@example.test', '08030000001', '11111111111', '1995-04-12'),
+('Chidi', 'Bello', 'chidi.bello@example.test', '08030000002', '22222222222', '1990-08-21'),
+('Zainab', 'Musa', 'zainab.musa@example.test', '08030000003', '33333333333', '1998-01-05');
+
+INSERT INTO accounts
+(customer_id, account_type_id, branch_id, account_number, current_balance)
+VALUES
+(1, 1, 1, '1000000001', 150000.00),
+(2, 2, 2, '1000000002', 75000.00),
+(3, 1, 1, '1000000003', 50000.00);
+
+INSERT INTO beneficiaries
+(customer_id, beneficiary_name, beneficiary_account_number, beneficiary_bank)
+VALUES
+(1, 'Chidi Bello', '1000000002', 'SwiftPay'),
+(2, 'Zainab Musa', '1000000003', 'SwiftPay');
+
+INSERT INTO bank_transactions
+(account_id, transaction_type, amount, transaction_status, description)
+VALUES
+(1, 'DEPOSIT', 150000.00, 'SUCCESSFUL', 'Illustrative opening deposit'),
+(2, 'DEPOSIT', 75000.00, 'SUCCESSFUL', 'Illustrative opening deposit'),
+(3, 'DEPOSIT', 50000.00, 'SUCCESSFUL', 'Illustrative opening deposit');
+
+INSERT INTO bank_transactions
+(account_id, transaction_type, amount, transaction_status, description)
+VALUES
+(1, 'TRANSFER', 10000.00, 'SUCCESSFUL', 'Sample transfer to account 1000000002');
+
+INSERT INTO transfers
+(transaction_id, sender_account_id, recipient_account_id, amount, transfer_reference, transfer_status)
+VALUES
+(4, 1, 2, 10000.00, 'SWP-DEMO-0001', 'SUCCESSFUL');
+
+INSERT INTO ledger_entries
+(transaction_id, account_id, entry_type, amount)
+VALUES
+(4, 1, 'DEBIT', 10000.00),
+(4, 2, 'CREDIT', 10000.00);
+
+INSERT INTO staff (first_name, last_name, email, role_name, branch_id) VALUES
+('Tunde', 'Afolabi', 'tunde.afolabi@example.test', 'Operations Officer', 1);
+
+INSERT INTO audit_logs (staff_id, action_name, table_affected, record_id, action_details) VALUES
+(1, 'CREATE_SAMPLE_TRANSFER', 'transfers', 1, 'Illustrative audit record for the sample transfer');
+
+COMMIT;
+
+-- Verification queries: run these after the script completes.
+SELECT table_name
+FROM information_schema.tables
+WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+ORDER BY table_name;
+
+SELECT account_number, current_balance, currency, account_status
+FROM accounts
+ORDER BY account_number;
+
+SELECT c.first_name, c.last_name, a.account_number, a.current_balance
+FROM customers c
+JOIN accounts a ON a.customer_id = c.customer_id
+ORDER BY c.customer_id;
+
+SELECT t.transfer_reference, t.amount, t.transfer_status,
+       s.account_number AS sender_account,
+       r.account_number AS recipient_account
+FROM transfers t
+JOIN accounts s ON s.account_id = t.sender_account_id
+JOIN accounts r ON r.account_id = t.recipient_account_id;
+
+SELECT transaction_id,
+       SUM(CASE WHEN entry_type = 'DEBIT' THEN amount ELSE 0 END) AS total_debits,
+       SUM(CASE WHEN entry_type = 'CREDIT' THEN amount ELSE 0 END) AS total_credits
+FROM ledger_entries
+GROUP BY transaction_id;
+
+
+SELECT account_id, current_balance
+FROM accounts
+WHERE account_id = 1;
+
+UPDATE accounts
+SET current_balance = 140000
+WHERE account_id = 1;
+
+UPDATE accounts
+SET current_balance = current_balance - 2000
+WHERE account_id = 1;
+
+COMMIT;
+
+
+
+SELECT
+    account_id,
+    account_number,
+    current_balance
+FROM accounts
+ORDER BY account_id;
